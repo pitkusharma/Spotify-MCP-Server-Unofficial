@@ -1,0 +1,21 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment variables
+.env
+
+# IDE/editor stuff
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
+spotify_token.json
+/app/spotify_token.json
