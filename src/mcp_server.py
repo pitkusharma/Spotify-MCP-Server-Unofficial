@@ -16,8 +16,22 @@ from app.spotify.services import (
     search_tracks,
     get_liked_songs,
 )
+from mcp.server.session import ServerSession
+from mcp.server.fastmcp import Context
+import asyncio
+from mcp.server.fastmcp.prompts import base
 
-mcp = FastMCP("spotify-mcp-server")
+from mcp.server.auth.provider import AccessToken, TokenVerifier
+from mcp.server.auth.settings import AuthSettings
+
+mcp = FastMCP(
+    name="Spotify MCP Server (Unofficial)",
+    auth=AuthSettings(
+        issuer_url=AnyHttpUrl("https://auth.example.com"),  # Authorization Server URL
+        resource_server_url=AnyHttpUrl("http://localhost:3001"),  # This server's URL
+        required_scopes=["user"],
+    )
+)
 
 
 # =========================
@@ -239,6 +253,39 @@ def liked_songs(limit: int = 20) -> Dict[str, Any]:
     """
     return get_liked_songs(limit=limit).model_dump()
 
+@mcp.resource("config://settings")
+def get_settings() -> str:
+    """Get application settings."""
+    return """{
+  "theme": "dark",
+  "language": "en",
+  "debug": false
+}"""
+
+@mcp.tool()
+async def get_temperature_of_saturn(ctx: Context[ServerSession, None]) -> str:
+    """Calculates heavy computation and finds out the temperature of saturn."""
+    await ctx.info(f"Starting heavy computation...")
+
+    for i in range(10):
+        await asyncio.sleep(1)
+        progress = (i + 1) / 10
+        await ctx.report_progress(
+            progress=progress,
+            total=1.0,
+            message=f"Step {i + 1}/{10}",
+        )
+        await ctx.debug(f"Completed step {i + 1}")
+
+    return f"Tempreature of saturn is -180 degree celsius."
+
+@mcp.prompt(title="Fairy Gold Prompt Template Boss")
+def fairy_gold_prompt_template_boss(error: str) -> list[base.Message]:
+    return [
+        base.UserMessage("I'm seeing this error:"),
+        base.UserMessage(error),
+        base.AssistantMessage("I'll help debug that. What have you tried so far?"),
+    ]
 
 if __name__ == "__main__":
     mcp.run("sse")
