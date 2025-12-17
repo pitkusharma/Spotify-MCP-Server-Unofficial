@@ -1,3 +1,4 @@
+import datetime
 import secrets
 import time
 from typing import Dict, Optional
@@ -17,7 +18,6 @@ from src.models.dto.auth_models import ClientRegistrationRequest
 # ---------------------------------------------------------------------------
 
 ACCESS_TOKEN_DEFAULT_TTL = 3600
-AUTH_REQUEST_TTL = 300  # 5 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +120,8 @@ def authorize(
         "redirect_uri": redirect_uri,
         "original_state": state,
         "original_code_challenge": code_challenge,
-        "scope": scope,
-        "expires_at": time.time() + AUTH_REQUEST_TTL,
+        "original_scope": scope,
+        "expires_at": datetime.datetime.now() + datetime.timedelta(seconds=settings.AUTH_REQUEST_TTL),
     }
     code_verifier, code_challenge = generate_pkce_pair()
     AUTH_REQUESTS[auth_id]["code_verifier"] = code_verifier
@@ -146,7 +146,7 @@ def authorize(
 # ---------------------------------------------------------------------------
 
 async def spotify_callback(code: str, state: Optional[str]):
-    auth = AUTH_REQUESTS.pop(state or "", None)
+    auth = AUTH_REQUESTS.get(state, None)
     if not auth:
         raise HTTPException(400, "Invalid or expired state")
 
@@ -203,7 +203,9 @@ async def issue_token(grant_type: str, code: str, code_verifier: str):
     if not token:
         raise HTTPException(400, "Invalid broker token")
 
-    auth_req = AUTH_REQUESTS[token["auth_request_id"]]
+    auth_req = AUTH_REQUESTS.pop(token["auth_request_id"], None)
+    if not auth_req:
+        raise HTTPException(400, "Invalid authorization request")
 
     verify_pkce(code_verifier, auth_req['original_code_challenge'])
 
@@ -230,7 +232,7 @@ async def issue_token(grant_type: str, code: str, code_verifier: str):
         )
 
     return {
-        "access_token": token['access_token'],
+        "access_token": token['spotify_access_token'],
         "token_type": "bearer",
         "expires_in": max(0, int(token["expires_at"] - time.time())),
         "scope": token["scope"],

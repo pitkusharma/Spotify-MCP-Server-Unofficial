@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     GRANT_TYPES_SUPPORTED: List[str] = ["authorization_code"]
     CODE_CHALLENGE_METHODS_SUPPORTED: List[str] = ["S256"]
 
+    AUTH_REQUEST_TTL: int = 300  # 5 minutes
+
     # ------------------------------------------------------------------
     # CORS
     # ------------------------------------------------------------------

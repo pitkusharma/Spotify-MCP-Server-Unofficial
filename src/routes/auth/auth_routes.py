@@ -41,7 +41,7 @@ def authorize(
         redirect_uri: str,
         code_challenge: str,
         code_challenge_method: str,
-        state: str,
+        state: str = "",
         scope: str = "",
 ):
     return auth_services.authorize(
