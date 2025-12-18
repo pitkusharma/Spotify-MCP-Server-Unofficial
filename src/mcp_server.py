@@ -2,7 +2,7 @@ from typing import Any, Dict, List
 
 from mcp.server.fastmcp import FastMCP
 
-from app.spotify.services import (
+from src.spotify.services import (
     play,
     pause,
     next_track,

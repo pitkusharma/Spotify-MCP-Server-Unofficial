@@ -285,14 +285,21 @@ async def _refresh_grant(client_id: str, refresh_token: str):
 
     new_token = resp.json()
 
-    access_token = token_service.generate_access_token({'token_id': token_id}, expires_in=new_token.get('expires_in'))
+    new_token_id = secrets.token_urlsafe(16)
+    access_token = token_service.generate_access_token({'token_id': new_token_id}, expires_in=new_token.get('expires_in'))
+    refresh_token = token_service.generate_refresh_token({'token_id': new_token_id})
 
-    SPOTIFY_TOKENS[token_id]['access_token'] = new_token['access_token']
-    SPOTIFY_TOKENS[token_id]['refresh_token'] = new_token['refresh_token']
+    del SPOTIFY_TOKENS[token_id]
+    SPOTIFY_TOKENS[new_token_id] = {
+        "client_id": client_id,
+        "access_token": new_token['access_token'],
+        "refresh_token": new_token['refresh_token'],
+    }
 
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "expires_in": new_token.get('expires_in'),
+        "refresh_token": refresh_token,
         "scope": settings.SUPPORTED_SCOPES_STR
     }

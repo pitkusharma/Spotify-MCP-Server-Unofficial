@@ -9,7 +9,7 @@ from src.models.dto.auth_models import (
     ProtectedResourceMetadata,
     AuthorizationServerMetadata,
     ClientRegistrationResponse,
-    TokenResponse, RefreshTokenResponse,
+    TokenResponse,
 )
 
 router = APIRouter()
@@ -66,7 +66,7 @@ def spotify_callback(code: str, state: Optional[str] = None):
     return auth_services.spotify_callback(code, state)
 
 
-@router.post("/token", response_model=TokenResponse | RefreshTokenResponse)
+@router.post("/token", response_model=TokenResponse)
 async def token(
         grant_type: str = Form(...),
         client_id: str = Form(...),
