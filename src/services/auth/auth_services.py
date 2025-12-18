@@ -1,23 +1,16 @@
-import datetime
 import secrets
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import HTTPException
 from fastapi.responses import RedirectResponse
+from pydantic import HttpUrl
 
+from src.common.token import JWTService
 from src.core.config import settings
 from src.common.security import generate_pkce_pair, verify_pkce
-from src.models.dto.auth_models import ClientRegistrationRequest
-
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-ACCESS_TOKEN_DEFAULT_TTL = 3600
 
 
 # ---------------------------------------------------------------------------
@@ -26,7 +19,7 @@ ACCESS_TOKEN_DEFAULT_TTL = 3600
 
 CLIENTS: Dict[str, dict] = {}
 AUTH_REQUESTS: Dict[str, dict] = {}
-BROKER_TOKENS: Dict[str, dict] = {}
+SPOTIFY_TOKENS: Dict[str, dict] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -66,22 +59,36 @@ def authorization_server_metadata():
 # Client registration
 # ---------------------------------------------------------------------------
 
-def register_client(payload: ClientRegistrationRequest):
+def register_client(client_name: str, redirect_uris: List[HttpUrl], grant_types: List[str], response_types: List[str]):
+    if not redirect_uris:
+        raise HTTPException(400, "redirect_uris required")
+
+    allowed_grants = list(set(grant_types) & set(settings.GRANT_TYPES_SUPPORTED))
+    if not allowed_grants:
+        raise HTTPException(400, f"Unsupported grant_type provided. supported grant_types: {settings.GRANT_TYPES_SUPPORTED}")
+
+    allowed_responses = list(set(response_types) & set(settings.RESPONSE_TYPES_SUPPORTED))
+    if not allowed_responses:
+        raise HTTPException(400, f"Unsupported response_type provided. supported response_type : {settings.RESPONSE_TYPES_SUPPORTED}")
+
     client_id = secrets.token_urlsafe(16)
-    client_secret = secrets.token_urlsafe(32)
+    client_secret = None
+    if settings.TOKEN_ENDPOINT_AUTH_METHOD != "none":
+        client_secret = secrets.token_urlsafe(32)
 
     CLIENTS[client_id] = {
-        "client_name": payload.client_name,
-        "redirect_uris": [str(uri) for uri in payload.redirect_uris],
-        "grant_types": payload.grant_types,
-        "response_types": payload.response_types,
-        "client_secret": client_secret
-    }
-
-    return {
         "client_id": client_id,
         "client_secret": client_secret,
+        "client_id_issued_at": int(time.time()),
+        "client_secret_expires_at": 0,
+        "client_name": client_name,
+        "redirect_uris": [str(uri) for uri in redirect_uris],
+        "grant_types": allowed_grants,
+        "response_types": allowed_responses,
+        "token_endpoint_auth_method": settings.TOKEN_ENDPOINT_AUTH_METHOD,
     }
+
+    return CLIENTS[client_id]
 
 
 # ---------------------------------------------------------------------------
@@ -114,14 +121,14 @@ def authorize(
         raise HTTPException(400, "Invalid code_challenge_method")
 
     # Create broker-side auth request
-    auth_id = secrets.token_urlsafe(16)
+    auth_id = secrets.token_urlsafe(32)
     AUTH_REQUESTS[auth_id] = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "original_state": state,
         "original_code_challenge": code_challenge,
         "original_scope": scope,
-        "expires_at": datetime.datetime.now() + datetime.timedelta(seconds=settings.AUTH_REQUEST_TTL),
+        "expires_at": time.time() + settings.AUTH_REQUEST_TTL,
     }
     code_verifier, code_challenge = generate_pkce_pair()
     AUTH_REQUESTS[auth_id]["code_verifier"] = code_verifier
@@ -145,46 +152,21 @@ def authorize(
 # Spotify callback
 # ---------------------------------------------------------------------------
 
-async def spotify_callback(code: str, state: Optional[str]):
+def spotify_callback(code: str, state: Optional[str]):
     auth = AUTH_REQUESTS.get(state, None)
     if not auth:
-        raise HTTPException(400, "Invalid or expired state")
+        raise HTTPException(400, "Invalid or expired authorization request")
 
     if time.time() > auth["expires_at"]:
+        del AUTH_REQUESTS[state]
         raise HTTPException(400, "Authorization request expired")
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(
-            settings.SPOTIFY_TOKEN_URL,
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": str(settings.SPOTIFY_REDIRECT_URI),
-                "client_id": settings.SPOTIFY_CLIENT_ID,
-                "client_secret": settings.SPOTIFY_CLIENT_SECRET,
-                "code_verifier": auth["code_verifier"],
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-
-    if resp.status_code != 200:
-        raise HTTPException(502, "Spotify token exchange failed")
-
-    tokens = resp.json()
-
-    broker_token = secrets.token_urlsafe(32)
-    BROKER_TOKENS[broker_token] = {
-        "spotify_access_token": tokens["access_token"],
-        "spotify_refresh_token": tokens.get("refresh_token"),
-        "expires_at": time.time() + tokens.get("expires_in", ACCESS_TOKEN_DEFAULT_TTL),
-        "scope": tokens.get("scope", ""),
-        "auth_request_id": state
-    }
+    auth['code'] = code
 
     redirect_uri = auth["redirect_uri"]
     original_state = auth["original_state"]
 
-    params = {"code": broker_token}
+    params = {"code": state}
     if original_state:
         params["state"] = original_state
 
@@ -195,45 +177,122 @@ async def spotify_callback(code: str, state: Optional[str]):
 # Token endpoint
 # ---------------------------------------------------------------------------
 
-async def issue_token(grant_type: str, code: str, code_verifier: str):
+async def issue_token(
+        grant_type: str,
+        client_id: str,
+        code: Optional[str]=None,
+        redirect_uri: Optional[HttpUrl]=None,
+        code_verifier: Optional[str]=None,
+        client_secret: Optional[str]=None,
+        refresh_token: Optional[str]=None,
+):
     if grant_type not in settings.GRANT_TYPES_SUPPORTED:
         raise HTTPException(400, "Invalid grant_type")
 
-    token = BROKER_TOKENS.get(code)
-    if not token:
-        raise HTTPException(400, "Invalid broker token")
+    client = CLIENTS.get(client_id, None)
 
-    auth_req = AUTH_REQUESTS.pop(token["auth_request_id"], None)
+    if not client:
+        raise HTTPException(400, "Invalid client_id")
+
+    if settings.TOKEN_ENDPOINT_AUTH_METHOD == 'client_secret_post' and (
+            not client_secret or client_secret != client['client_secret']):
+        raise HTTPException(400, "Invalid client_secret")
+
+    if grant_type == "authorization_code":
+        return await _code_grant(client_id, code, redirect_uri, code_verifier)
+    elif grant_type == "refresh_token":
+        return await _refresh_grant(client_id, refresh_token)
+    else:
+        raise HTTPException(400, "Invalid grant_type")
+
+
+async def _code_grant(client_id: str, code: str, redirect_uri: HttpUrl, code_verifier: str):
+    auth_req = AUTH_REQUESTS.pop(code, None)
     if not auth_req:
         raise HTTPException(400, "Invalid authorization request")
 
+    if str(redirect_uri) != auth_req["redirect_uri"]:
+        raise HTTPException(400, "Invalid redirect_uri")
+
     verify_pkce(code_verifier, auth_req['original_code_challenge'])
 
-    if time.time() > token["expires_at"]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                settings.SPOTIFY_TOKEN_URL,
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": token["spotify_refresh_token"],
-                    "client_id": settings.SPOTIFY_CLIENT_ID,
-                    "client_secret": settings.SPOTIFY_CLIENT_SECRET,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
+    token_service = JWTService()
+    token_id = secrets.token_urlsafe(16)
 
-        if resp.status_code != 200:
-            raise HTTPException(502, "Spotify refresh failed")
-
-        refreshed = resp.json()
-        token["spotify_access_token"] = refreshed["access_token"]
-        token["expires_at"] = time.time() + refreshed.get(
-            "expires_in", ACCESS_TOKEN_DEFAULT_TTL
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            settings.SPOTIFY_TOKEN_URL,
+            data={
+                "grant_type": "authorization_code",
+                "code": auth_req['code'],
+                "redirect_uri": str(settings.SPOTIFY_REDIRECT_URI),
+                "client_id": settings.SPOTIFY_CLIENT_ID,
+                "client_secret": settings.SPOTIFY_CLIENT_SECRET,
+                "code_verifier": auth_req["code_verifier"],
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
 
+    if resp.status_code != 200:
+        raise HTTPException(502, "Spotify token exchange failed")
+
+    spotify_tokens = resp.json()
+
+    access_token = token_service.generate_access_token({'token_id': token_id},
+                                                       expires_in=spotify_tokens.get('expires_in'))
+    refresh_token = token_service.generate_refresh_token({'token_id': token_id})
+
+    SPOTIFY_TOKENS[token_id] = {
+        "client_id": client_id,
+        "access_token": spotify_tokens["access_token"],
+        "refresh_token": spotify_tokens["refresh_token"],
+    }
+
     return {
-        "access_token": token['spotify_access_token'],
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
-        "expires_in": max(0, int(token["expires_at"] - time.time())),
-        "scope": token["scope"],
+        "expires_in": spotify_tokens.get('expires_in'),
+        "scope": settings.SUPPORTED_SCOPES_STR
+    }
+
+async def _refresh_grant(client_id: str, refresh_token: str):
+    token_service = JWTService()
+
+    token_data = token_service.verify_refresh_token(refresh_token)
+    token_id = token_data["token_id"]
+    stored_tokens = SPOTIFY_TOKENS.get(token_id, None)
+    if not stored_tokens:
+        raise HTTPException(400, "Invalid refresh_token")
+
+    if client_id != stored_tokens['client_id']:
+        raise HTTPException(400, "Invalid client_id")
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            settings.SPOTIFY_TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": stored_tokens['refresh_token'],
+                "client_id": settings.SPOTIFY_CLIENT_ID,
+                "client_secret": settings.SPOTIFY_CLIENT_SECRET,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+    if resp.status_code != 200:
+        raise HTTPException(502, "Spotify token exchange failed")
+
+    new_token = resp.json()
+
+    access_token = token_service.generate_access_token({'token_id': token_id}, expires_in=new_token.get('expires_in'))
+
+    SPOTIFY_TOKENS[token_id]['access_token'] = new_token['access_token']
+    SPOTIFY_TOKENS[token_id]['refresh_token'] = new_token['refresh_token']
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": new_token.get('expires_in'),
+        "scope": settings.SUPPORTED_SCOPES_STR
     }

@@ -30,43 +30,28 @@ class AuthorizationServerMetadata(BaseModel):
 
 
 # ----- Client Registration -----
-
-class ClientRegistrationRequest(BaseModel):
-    client_name: str
-    redirect_uris: List[HttpUrl]
-    grant_types: List[str]
-    response_types: List[str]
-
-    @field_validator("grant_types")
-    @classmethod
-    def validate_grant_types(cls, value: List[str]) -> List[str]:
-        unsupported = set(value) - set(settings.GRANT_TYPES_SUPPORTED)
-        if unsupported:
-            raise ValueError(
-                f"Unsupported grant_types: {unsupported}. "
-                f"Supported: {settings.GRANT_TYPES_SUPPORTED}"
-            )
-        return value
-
-    @field_validator("response_types")
-    @classmethod
-    def validate_response_types(cls, value: List[str]) -> List[str]:
-        unsupported = set(value) - set(settings.RESPONSE_TYPES_SUPPORTED)
-        if unsupported:
-            raise ValueError(
-                f"Unsupported response_types: {unsupported}. "
-                f"Supported: {settings.RESPONSE_TYPES_SUPPORTED}"
-            )
-        return value
-
-
 class ClientRegistrationResponse(BaseModel):
     client_id: str
-    client_secret: str
+    client_secret: Optional[str] = None
+    client_secret_expires_at: int = 0
+    redirect_uris: List[str] = []
+    client_id_issued_at: int
+    client_name: str
+    redirect_uris: List[str]
+    grant_types: List[str]
+    response_types: List[str]
+    token_endpoint_auth_method: str = settings.TOKEN_ENDPOINT_AUTH_METHOD
 
 
 # ----- Token -----
 class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    refresh_token: str
+    scope: str
+
+class RefreshTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int

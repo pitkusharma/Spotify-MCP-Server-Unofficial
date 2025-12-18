@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Form
-from typing import Optional
+from typing import Optional, List
+
+from pydantic import HttpUrl
 
 from src.services.auth import auth_services
 from src.models.dto.auth_models import (
     HealthResponse,
     ProtectedResourceMetadata,
     AuthorizationServerMetadata,
-    ClientRegistrationRequest,
     ClientRegistrationResponse,
-    TokenResponse,
+    TokenResponse, RefreshTokenResponse,
 )
 
 router = APIRouter()
@@ -30,8 +31,13 @@ def authorization_server_metadata():
 
 
 @router.post("/register", response_model=ClientRegistrationResponse)
-def register_client(payload: ClientRegistrationRequest):
-    return auth_services.register_client(payload)
+def register_client(
+        client_name: str = Form(...),
+        redirect_uris: List[HttpUrl] = Form(...),
+        grant_types: List[str] = Form(...),
+        response_types: List[str] = Form(...),
+):
+    return auth_services.register_client(client_name, redirect_uris, grant_types, response_types)
 
 
 @router.get("/authorize")
@@ -56,14 +62,55 @@ def authorize(
 
 
 @router.get("/callback/spotify")
-async def spotify_callback(code: str, state: Optional[str] = None):
-    return await auth_services.spotify_callback(code, state)
+def spotify_callback(code: str, state: Optional[str] = None):
+    return auth_services.spotify_callback(code, state)
 
 
-@router.post("/token", response_model=TokenResponse)
+@router.post("/token", response_model=TokenResponse | RefreshTokenResponse)
 async def token(
         grant_type: str = Form(...),
-        code: str = Form(...),
-        code_verifier: str = Form(...),
+        client_id: str = Form(...),
+        code: str = Form(None),
+        redirect_uri: HttpUrl = Form(None),
+        code_verifier: str = Form(None),
+        client_secret: Optional[str] = Form(None),
+        refresh_token: str = Form(None),
+
+
 ):
-    return await auth_services.issue_token(grant_type, code, code_verifier)
+    return await auth_services.issue_token(grant_type, client_id, code, redirect_uri, code_verifier, client_secret, refresh_token)
+
+
+# @router.post("/refresh", response_model=TokenResponse)
+# async def refresh_token(refresh_token: str = Form(...)):
+#     """
+#     Exchange a valid refresh token for a new access token.
+#     Optionally issues a new refresh token if broker logic allows.
+#     """
+#     return await auth_services.refresh_token(refresh_token)
+#
+#
+# @router.post("/introspect")
+# async def introspect_token(token: str = Form(...)):
+#     """
+#     Return token metadata.
+#     Should return at least:
+#     {
+#         "active": bool,
+#         "scope": str,
+#         "client_id": str,
+#         "exp": int,  # Optional
+#         "iat": int,  # Optional
+#         "sub": str,  # Optional
+#     }
+#     """
+#     return await auth_services.introspect_token(token)
+#
+#
+# @router.post("/revoke")
+# async def revoke_token(token: str = Form(...), token_type_hint: Optional[str] = Form(None)):
+#     """
+#     Revoke an access or refresh token.
+#     token_type_hint = 'access_token' | 'refresh_token' (optional)
+#     """
+#     return await auth_services.revoke_token(token, token_type_hint)

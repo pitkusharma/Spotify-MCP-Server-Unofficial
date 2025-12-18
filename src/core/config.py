@@ -56,10 +56,20 @@ class Settings(BaseSettings):
     STATE_BYTES: int = 16
 
     RESPONSE_TYPES_SUPPORTED: List[str] = ["code"]
-    GRANT_TYPES_SUPPORTED: List[str] = ["authorization_code"]
+    GRANT_TYPES_SUPPORTED: List[str] = ["authorization_code", "refresh_token"]
     CODE_CHALLENGE_METHODS_SUPPORTED: List[str] = ["S256"]
+    TOKEN_ENDPOINT_AUTH_METHOD: str = "none"
 
-    AUTH_REQUEST_TTL: int = 300  # 5 minutes
+    AUTH_REQUEST_TTL: int = 300 # 5 minutes
+
+    # jwt
+    JWT_SECRET: str
+    @property
+    def JWT_ISSUER(self) -> str:
+        return str(self.BASE_URL)
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TTL: int = 3600 # 1 hour
+    JWT_REFRESH_TTL: int = 31536000 # 1 year
 
     # ------------------------------------------------------------------
     # CORS
