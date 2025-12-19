@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, AnyHttpUrl, ConfigDict
 from typing import List, Optional
 
 from src.core.config import settings
@@ -30,6 +30,15 @@ class AuthorizationServerMetadata(BaseModel):
 
 
 # ----- Client Registration -----
+class ClientRegistrationRequest(BaseModel):
+    client_name: Optional[str] = None
+    redirect_uris: List[AnyHttpUrl]
+    grant_types: List[str]
+    response_types: List[str]
+    scope: Optional[str] = None
+    token_endpoint_auth_method: Optional[str] = "none"
+    model_config = ConfigDict(extra="allow")
+
 class ClientRegistrationResponse(BaseModel):
     client_id: str
     client_secret: Optional[str] = None

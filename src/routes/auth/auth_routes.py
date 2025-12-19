@@ -9,7 +9,7 @@ from src.models.dto.auth_models import (
     ProtectedResourceMetadata,
     AuthorizationServerMetadata,
     ClientRegistrationResponse,
-    TokenResponse,
+    TokenResponse, ClientRegistrationRequest,
 )
 
 router = APIRouter()
@@ -29,16 +29,9 @@ def protected_resource_metadata():
 def authorization_server_metadata():
     return auth_services.authorization_server_metadata()
 
-
 @router.post("/register", response_model=ClientRegistrationResponse)
-def register_client(
-        client_name: str = Form(...),
-        redirect_uris: List[HttpUrl] = Form(...),
-        grant_types: List[str] = Form(...),
-        response_types: List[str] = Form(...),
-):
-    return auth_services.register_client(client_name, redirect_uris, grant_types, response_types)
-
+def register_client(payload: ClientRegistrationRequest):
+    return auth_services.register_client(payload)
 
 @router.get("/authorize")
 def authorize(

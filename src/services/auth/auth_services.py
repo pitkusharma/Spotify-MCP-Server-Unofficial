@@ -11,7 +11,7 @@ from pydantic import HttpUrl
 from src.common.token import JWTService
 from src.core.config import settings
 from src.common.security import generate_pkce_pair, verify_pkce
-
+from src.models.dto.auth_models import ClientRegistrationRequest
 
 # ---------------------------------------------------------------------------
 # In-memory stores (yes yes, Redis later)
@@ -36,7 +36,7 @@ def health():
 
 def protected_resource_metadata():
     return {
-        "resource": f"settings.BASE_URL/mcp",
+        "resource": settings.MCP_SERVER_URL,
         "authorization_servers": [settings.BASE_URL],
         "scopes_supported": settings.SUPPORTED_SCOPES
     }
@@ -52,6 +52,7 @@ def authorization_server_metadata():
         "response_types_supported": settings.RESPONSE_TYPES_SUPPORTED,
         "grant_types_supported": settings.GRANT_TYPES_SUPPORTED,
         "code_challenge_methods_supported": settings.CODE_CHALLENGE_METHODS_SUPPORTED,
+        "token_endpoint_auth_methods_supported": settings.TOKEN_ENDPOINT_AUTH_METHODS_SUPPORTED,
     }
 
 
@@ -59,17 +60,22 @@ def authorization_server_metadata():
 # Client registration
 # ---------------------------------------------------------------------------
 
-def register_client(client_name: str, redirect_uris: List[HttpUrl], grant_types: List[str], response_types: List[str]):
-    if not redirect_uris:
+def register_client(payload: ClientRegistrationRequest):
+    if not payload.redirect_uris:
         raise HTTPException(400, "redirect_uris required")
 
-    allowed_grants = list(set(grant_types) & set(settings.GRANT_TYPES_SUPPORTED))
+    allowed_grants = list(set(payload.grant_types) & set(settings.GRANT_TYPES_SUPPORTED))
     if not allowed_grants:
         raise HTTPException(400, f"Unsupported grant_type provided. supported grant_types: {settings.GRANT_TYPES_SUPPORTED}")
 
-    allowed_responses = list(set(response_types) & set(settings.RESPONSE_TYPES_SUPPORTED))
+    allowed_responses = list(set(payload.response_types) & set(settings.RESPONSE_TYPES_SUPPORTED))
     if not allowed_responses:
         raise HTTPException(400, f"Unsupported response_type provided. supported response_type : {settings.RESPONSE_TYPES_SUPPORTED}")
+
+    if payload.scope:
+        allowed_scopes = list(set(payload.scope.split()) & set(settings.SUPPORTED_SCOPES))
+        if not allowed_scopes:
+            raise HTTPException(400, f"Unsupported scope provided. supported scopes: {settings.SUPPORTED_SCOPES}")
 
     client_id = secrets.token_urlsafe(16)
     client_secret = None
@@ -81,15 +87,15 @@ def register_client(client_name: str, redirect_uris: List[HttpUrl], grant_types:
         "client_secret": client_secret,
         "client_id_issued_at": int(time.time()),
         "client_secret_expires_at": 0,
-        "client_name": client_name,
-        "redirect_uris": [str(uri) for uri in redirect_uris],
+        "client_name": payload.client_name,
+        "redirect_uris": [str(uri) for uri in payload.redirect_uris],
         "grant_types": allowed_grants,
         "response_types": allowed_responses,
+        "scope": payload.scope,
         "token_endpoint_auth_method": settings.TOKEN_ENDPOINT_AUTH_METHOD,
     }
 
     return CLIENTS[client_id]
-
 
 # ---------------------------------------------------------------------------
 # Authorization endpoint
@@ -137,7 +143,8 @@ def authorize(
         "client_id": settings.SPOTIFY_CLIENT_ID,
         "response_type": "code",
         "redirect_uri": str(settings.SPOTIFY_REDIRECT_URI),
-        "scope": settings.SUPPORTED_SCOPES_STR,
+        # "scope": settings.SUPPORTED_SCOPES_STR,
+        "scope": scope,
         "state": auth_id,  # IMPORTANT
         "code_challenge": code_challenge,
         "code_challenge_method": code_challenge_method,

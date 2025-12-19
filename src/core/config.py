@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     RESPONSE_TYPES_SUPPORTED: List[str] = ["code"]
     GRANT_TYPES_SUPPORTED: List[str] = ["authorization_code", "refresh_token"]
     CODE_CHALLENGE_METHODS_SUPPORTED: List[str] = ["S256"]
+    TOKEN_ENDPOINT_AUTH_METHODS_SUPPORTED: List[str] = ["none"]
     TOKEN_ENDPOINT_AUTH_METHOD: str = "none"
 
     AUTH_REQUEST_TTL: int = 300 # 5 minutes
@@ -77,6 +78,11 @@ class Settings(BaseSettings):
     CORS_ALLOW_ORIGINS: List[str] = ["*"]
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]
+
+    # ------------------------------------------------------------------
+    # MCP Server
+    # ------------------------------------------------------------------
+    MCP_SERVER_URL: str = "http://127.0.0.1:8000/sse"
 
     # ------------------------------------------------------------------
     # Meta
