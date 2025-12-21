@@ -20,8 +20,9 @@ class Settings(BaseSettings):
         return f"{self.PROTOCOL}://{self.HOST}:{self.PORT}"
 
     # ------------------------------------------------------------------
-    # Spotify OAuth
+    # Spotify
     # ------------------------------------------------------------------
+    SPOTIFY_BASE_URL: str = "https://api.spotify.com/v1"
     SPOTIFY_CLIENT_ID: str
     SPOTIFY_CLIENT_SECRET: str
     SPOTIFY_AUTH_URL: str = "https://accounts.spotify.com/authorize"
@@ -80,11 +81,6 @@ class Settings(BaseSettings):
     CORS_ALLOW_ORIGINS: List[str] = ["*"]
     CORS_ALLOW_METHODS: List[str] = ["*"]
     CORS_ALLOW_HEADERS: List[str] = ["*"]
-
-    # ------------------------------------------------------------------
-    # MCP
-    # ------------------------------------------------------------------
-    MCP_SERVER_URL: str = "http://127.0.0.1:8000/sse"
 
     # ------------------------------------------------------------------
     # Meta

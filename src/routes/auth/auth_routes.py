@@ -1,6 +1,4 @@
 from fastapi import APIRouter, Form
-from typing import Optional, List
-
 from pydantic import HttpUrl
 
 from src.services.auth import auth_services
@@ -73,38 +71,3 @@ async def token(
 
 ):
     return await auth_services.issue_token(grant_type, client_id, code, redirect_uri, code_verifier, refresh_token)
-
-
-# @router.post("/refresh", response_model=TokenResponse)
-# async def refresh_token(refresh_token: str = Form(...)):
-#     """
-#     Exchange a valid refresh token for a new access token.
-#     Optionally issues a new refresh token if broker logic allows.
-#     """
-#     return await auth_services.refresh_token(refresh_token)
-#
-#
-# @router.post("/introspect")
-# async def introspect_token(token: str = Form(...)):
-#     """
-#     Return token metadata.
-#     Should return at least:
-#     {
-#         "active": bool,
-#         "scope": str,
-#         "client_id": str,
-#         "exp": int,  # Optional
-#         "iat": int,  # Optional
-#         "sub": str,  # Optional
-#     }
-#     """
-#     return await auth_services.introspect_token(token)
-#
-#
-# @router.post("/revoke")
-# async def revoke_token(token: str = Form(...), token_type_hint: Optional[str] = Form(None)):
-#     """
-#     Revoke an access or refresh token.
-#     token_type_hint = 'access_token' | 'refresh_token' (optional)
-#     """
-#     return await auth_services.revoke_token(token, token_type_hint)

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import HttpUrl
 
+from src.common.exceptions import OAuthException
 from src.common.token import JWTService
 from src.core.config import settings
 from src.common.security import generate_pkce_pair, verify_pkce
@@ -29,14 +30,14 @@ SPOTIFY_TOKENS: Dict[str, dict] = {}
 def health():
     return {
         "status": "ok",
-        "app": settings.APP_NAME,
+        "app": settings.APP_NAMEE,
         "env": settings.ENV,
     }
 
 
 def protected_resource_metadata():
     return {
-        "resource": settings.MCP_SERVER_URL,
+        "resource": f'{settings.BASE_URL}/mcp',
         "authorization_servers": [settings.BASE_URL],
         "scopes_supported": settings.SUPPORTED_SCOPES
     }
@@ -62,28 +63,47 @@ def authorization_server_metadata():
 # ---------------------------------------------------------------------------
 
 def register_client(payload: ClientRegistrationRequest):
+    # redirect_uris required
     if not payload.redirect_uris:
-        raise HTTPException(400, "redirect_uris required")
+        raise OAuthException(
+            error="invalid_client_metadata",
+            description="Missing required field: redirect_uris"
+        )
 
     # grant_types: reject if ANY unsupported
     unsupported_grants = set(payload.grant_types) - set(settings.GRANT_TYPES_SUPPORTED)
     if unsupported_grants:
-        raise HTTPException(400, f"unsupported_grant_type: {unsupported_grants}")
+        raise OAuthException(
+            error="unsupported_grant_type",
+            description=f"Unsupported grant_type(s) requested: {', '.join(unsupported_grants)}"
+        )
 
     # response_types: same rule
     unsupported_responses = set(payload.response_types) - set(settings.RESPONSE_TYPES_SUPPORTED)
     if unsupported_responses:
-        raise HTTPException(400, f"unsupported_response_type: {unsupported_responses}")
+        raise OAuthException(
+            error="unsupported_response_type",
+            description=f"Unsupported response_type(s) requested: {', '.join(unsupported_responses)}"
+        )
 
+    # token_endpoint_auth_method must be "none"
     if payload.token_endpoint_auth_method != "none":
-        raise HTTPException(400, "invalid_client_metadata")
+        raise OAuthException(
+            error="invalid_client_metadata",
+            description=f"Invalid token_endpoint_auth_method: {payload.token_endpoint_auth_method}"
+        )
 
+    # scope validation
     if payload.scope:
         requested = set(payload.scope.split())
         unsupported = requested - set(settings.SUPPORTED_SCOPES)
         if unsupported:
-            raise HTTPException(400, "unsupported_scope")
+            raise OAuthException(
+                error="invalid_scope",
+                description=f"Unsupported scope(s) requested: {', '.join(unsupported)}"
+            )
 
+    # generate client_id
     client_id = secrets.token_urlsafe(16)
 
     CLIENTS[client_id] = {
@@ -109,6 +129,7 @@ def register_client(payload: ClientRegistrationRequest):
     }
 
 
+
 # ---------------------------------------------------------------------------
 # Authorization endpoint
 # ---------------------------------------------------------------------------
@@ -122,29 +143,58 @@ def authorize(
     code_challenge: str,
     code_challenge_method: str,
 ):
+    # response_type check
     if response_type not in settings.RESPONSE_TYPES_SUPPORTED:
-        raise HTTPException(400, "Unsupported response_type")
+        raise OAuthException(
+            error="unsupported_response_type",
+            description=f"Unsupported response_type: {response_type}"
+        )
 
+    # client_id check
     client = CLIENTS.get(client_id)
     if not client:
-        raise HTTPException(400, "Invalid client_id")
+        raise OAuthException(
+            error="invalid_client",
+            description=f"Invalid client_id: {client_id}"
+        )
 
+    # redirect_uri check
     if redirect_uri not in client["redirect_uris"]:
-        raise HTTPException(400, "Invalid redirect_uri")
+        raise OAuthException(
+            error="invalid_redirect_uri",
+            description=f"redirect_uri not registered: {redirect_uri}"
+        )
 
+    # code_challenge check
     if not code_challenge:
-        raise HTTPException(400, "Missing code_challenge")
+        raise OAuthException(
+            error="invalid_request",
+            description="Missing code_challenge"
+        )
 
+    # code_challenge_method check
     if code_challenge_method not in settings.CODE_CHALLENGE_METHODS_SUPPORTED:
-        raise HTTPException(400, "Invalid code_challenge_method")
+        raise OAuthException(
+            error="invalid_request",
+            description=f"Invalid code_challenge_method: {code_challenge_method}"
+        )
 
+    # scope check
     if not scope:
-        raise HTTPException(400, "invalid_scope")
+        raise OAuthException(
+            error="invalid_scope",
+            description="Missing scope in request"
+        )
 
     requested_scopes = set(scope.split())
-    if not requested_scopes.issubset(set(settings.SUPPORTED_SCOPES)):
-        raise HTTPException(400, "invalid_scope")
-    requested_scopes = ' '.join(requested_scopes)
+    unsupported_scopes = requested_scopes - set(settings.SUPPORTED_SCOPES)
+    if unsupported_scopes:
+        raise OAuthException(
+            error="invalid_scope",
+            description=f"Unsupported scope(s) requested: {', '.join(unsupported_scopes)}"
+        )
+
+    requested_scopes_str = ' '.join(requested_scopes)
 
     # Create broker-side auth request
     auth_id = secrets.token_urlsafe(32)
@@ -153,9 +203,10 @@ def authorize(
         "redirect_uri": redirect_uri,
         "original_state": state,
         "original_code_challenge": code_challenge,
-        "original_scope": requested_scopes,
+        "original_scope": requested_scopes_str,
         "expires_at": time.time() + settings.AUTH_REQUEST_TTL,
     }
+
     code_verifier, code_challenge = generate_pkce_pair()
     AUTH_REQUESTS[auth_id]["code_verifier"] = code_verifier
 
@@ -163,8 +214,8 @@ def authorize(
         "client_id": settings.SPOTIFY_CLIENT_ID,
         "response_type": "code",
         "redirect_uri": str(settings.SPOTIFY_REDIRECT_URI),
-        "scope": requested_scopes,
-        "state": auth_id,  # IMPORTANT
+        "scope": requested_scopes_str,
+        "state": auth_id,  # broker state
         "code_challenge": code_challenge,
         "code_challenge_method": code_challenge_method,
     }
@@ -174,29 +225,39 @@ def authorize(
     )
 
 
+
 # ---------------------------------------------------------------------------
 # Spotify callback
 # ---------------------------------------------------------------------------
 
 def spotify_callback(code: str, state: str):
-    auth = AUTH_REQUESTS.get(state, None)
+    auth = AUTH_REQUESTS.get(state)
     if not auth:
-        raise HTTPException(400, "Invalid or expired authorization request")
+        raise OAuthException(
+            error="invalid_request",
+            description="Invalid or expired authorization request"
+        )
 
     if time.time() > auth["expires_at"]:
         del AUTH_REQUESTS[state]
-        raise HTTPException(400, "Authorization request expired")
+        raise OAuthException(
+            error="invalid_request",
+            description="Authorization request has expired"
+        )
 
-    auth['code'] = code
+    # Mark code in broker request
+    auth["code"] = code
 
     redirect_uri = auth["redirect_uri"]
-    original_state = auth["original_state"]
+    original_state = auth.get("original_state")
 
-    params = {"code": state}
+    # Return code to client
+    params = {"code": state}  # broker auth_id as code
     if original_state:
         params["state"] = original_state
 
     return RedirectResponse(f"{redirect_uri}?{urlencode(params)}")
+
 
 
 # ---------------------------------------------------------------------------
@@ -206,59 +267,87 @@ def spotify_callback(code: str, state: str):
 async def issue_token(
         grant_type: str,
         client_id: str,
-        code: Optional[str]=None,
-        redirect_uri: Optional[HttpUrl]=None,
-        code_verifier: Optional[str]=None,
-        refresh_token: Optional[str]=None,
+        code: Optional[str] = None,
+        redirect_uri: Optional[HttpUrl] = None,
+        code_verifier: Optional[str] = None,
+        refresh_token: Optional[str] = None,
 ):
+    # Grant type validation
     if grant_type not in settings.GRANT_TYPES_SUPPORTED:
-        raise HTTPException(400, "Invalid grant_type")
+        raise OAuthException(
+            error="unsupported_grant_type",
+            description=f"Invalid grant_type: {grant_type}"
+        )
 
-    client = CLIENTS.get(client_id, None)
-
+    # Client validation
+    client = CLIENTS.get(client_id)
     if not client:
-        raise HTTPException(400, "Invalid client_id")
+        raise OAuthException(
+            error="invalid_client",
+            description=f"Unknown client_id: {client_id}"
+        )
 
+    # Dispatch to proper grant
     if grant_type == "authorization_code":
         return await _code_grant(client_id, code, redirect_uri, code_verifier)
     elif grant_type == "refresh_token":
         return await _refresh_grant(client_id, refresh_token)
     else:
-        raise HTTPException(400, "Invalid grant_type")
+        # This should not occur due to the first check
+        raise OAuthException(
+            error="unsupported_grant_type",
+            description=f"Unsupported grant_type: {grant_type}"
+        )
 
 
 async def _code_grant(client_id: str, code: str, redirect_uri: HttpUrl, code_verifier: str):
     if not code or not redirect_uri or not code_verifier:
-        raise HTTPException(400, "invalid_request")
+        raise OAuthException(
+            error="invalid_request",
+            description="Missing required fields: code, redirect_uri, or code_verifier"
+        )
 
     auth_req = AUTH_REQUESTS.pop(code, None)
     if not auth_req:
-        raise HTTPException(400, "Invalid authorization request")
+        raise OAuthException(
+            error="invalid_grant",
+            description="Invalid or expired authorization request"
+        )
 
     if str(redirect_uri) != auth_req["redirect_uri"]:
-        raise HTTPException(400, "Invalid redirect_uri")
+        raise OAuthException(
+            error="invalid_request",
+            description=f"redirect_uri mismatch: {redirect_uri}"
+        )
 
-    verify_pkce(code_verifier, auth_req['original_code_challenge'])
+    if not verify_pkce(code_verifier, auth_req['original_code_challenge']):
+        raise OAuthException(error="pkce_failed", description="code challenge mismatch")
 
     token_service = JWTService()
     token_id = secrets.token_urlsafe(16)
 
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(
-            settings.SPOTIFY_TOKEN_URL,
-            data={
-                "grant_type": "authorization_code",
-                "code": auth_req['code'],
-                "redirect_uri": str(settings.SPOTIFY_REDIRECT_URI),
-                "client_id": settings.SPOTIFY_CLIENT_ID,
-                "client_secret": settings.SPOTIFY_CLIENT_SECRET,
-                "code_verifier": auth_req["code_verifier"],
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                settings.SPOTIFY_TOKEN_URL,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": auth_req['code'],
+                    "redirect_uri": str(settings.SPOTIFY_REDIRECT_URI),
+                    "client_id": settings.SPOTIFY_CLIENT_ID,
+                    "client_secret": settings.SPOTIFY_CLIENT_SECRET,
+                    "code_verifier": auth_req["code_verifier"],
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+    except Exception as exc:
+        raise OAuthException(error="server_error", description="Spotify token retrival failed")
 
     if resp.status_code != 200:
-        raise HTTPException(502, "Spotify token exchange failed")
+        raise OAuthException(
+            error="server_error",
+            description="Spotify token retrival failed"
+        )
 
     spotify_tokens = resp.json()
 
@@ -281,17 +370,37 @@ async def _code_grant(client_id: str, code: str, redirect_uri: HttpUrl, code_ver
         "scope": auth_req["original_scope"]
     }
 
+
 async def _refresh_grant(client_id: str, refresh_token: str):
+    if not refresh_token:
+        raise OAuthException(
+            error="invalid_request",
+            description="Missing refresh_token"
+        )
+
     token_service = JWTService()
 
-    token_data = token_service.verify_refresh_token(refresh_token)
+    try:
+        token_data = token_service.verify_refresh_token(refresh_token)
+    except Exception:
+        raise OAuthException(
+            error="invalid_grant",
+            description="Invalid refresh_token format"
+        )
+
     token_id = token_data["token_id"]
-    stored_tokens = SPOTIFY_TOKENS.get(token_id, None)
+    stored_tokens = SPOTIFY_TOKENS.get(token_id)
     if not stored_tokens:
-        raise HTTPException(400, "Invalid refresh_token")
+        raise OAuthException(
+            error="invalid_grant",
+            description="Refresh token not found or expired"
+        )
 
     if client_id != stored_tokens['client_id']:
-        raise HTTPException(400, "Invalid client_id")
+        raise OAuthException(
+            error="invalid_client",
+            description="refresh_token does not belong to this client"
+        )
 
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(
@@ -306,14 +415,18 @@ async def _refresh_grant(client_id: str, refresh_token: str):
         )
 
     if resp.status_code != 200:
-        raise HTTPException(502, "Spotify token exchange failed")
+        raise OAuthException(
+            error="server_error",
+            description="Spotify refresh token exchange failed"
+        )
 
     new_token = resp.json()
-
     new_token_id = secrets.token_urlsafe(16)
+
     access_token = token_service.generate_access_token({'token_id': new_token_id}, expires_in=new_token.get('expires_in'))
     refresh_token = token_service.generate_refresh_token({'token_id': new_token_id})
 
+    # Replace old token
     del SPOTIFY_TOKENS[token_id]
     SPOTIFY_TOKENS[new_token_id] = {
         "client_id": client_id,
@@ -329,3 +442,4 @@ async def _refresh_grant(client_id: str, refresh_token: str):
         "refresh_token": refresh_token,
         "scope": stored_tokens["scope"]
     }
+

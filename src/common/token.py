@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional
 
 import jwt
 
+from src.common.exceptions import AppException
 from src.core.config import settings
 
 
@@ -177,10 +178,20 @@ class JWTService:
         Returns:
             Decoded JWT payload.
         """
-        return self._decode_token(
-            token=token,
-            expected_type="access",
-        )
+        try:
+            return self._decode_token(token, expected_type="access")
+        except jwt.ExpiredSignatureError:
+            raise AppException(message="Access token expired", status_code=401, headers={
+                "WWW-Authenticate": 'Bearer error="invalid_token"'
+            })
+        except jwt.InvalidTokenError:
+            raise AppException(message="Invalid access token", status_code=401, headers={
+                "WWW-Authenticate": 'Bearer error="invalid_token"'
+            })
+        except ValueError as e:
+            raise AppException(message=str(e), status_code=401, headers={
+                "WWW-Authenticate": 'Bearer error="invalid_token"'
+            })
 
     def verify_refresh_token(self, token: str) -> Dict[str, Any]:
         """
@@ -192,10 +203,20 @@ class JWTService:
         Returns:
             Decoded JWT payload.
         """
-        return self._decode_token(
-            token=token,
-            expected_type="refresh",
-        )
+        try:
+            return self._decode_token(token, expected_type="refresh")
+        except jwt.ExpiredSignatureError:
+            raise AppException(message="Refresh token expired", status_code=401, headers={
+                "WWW-Authenticate": 'Bearer error="invalid_token"'
+            })
+        except jwt.InvalidTokenError:
+            raise AppException(message="Invalid refresh token", status_code=401, headers={
+                "WWW-Authenticate": 'Bearer error="invalid_token"'
+            })
+        except ValueError as e:
+            raise AppException(message=str(e), status_code=401, headers={
+                "WWW-Authenticate": 'Bearer error="invalid_token"'
+            })
 
     def refresh_access_token(
         self,
@@ -212,13 +233,13 @@ class JWTService:
         Returns:
             A newly issued JWT access token.
         """
-        claims: Dict[str, Any] = self.verify_refresh_token(refresh_token)
+        try:
+            claims: Dict[str, Any] = self.verify_refresh_token(refresh_token)
+        except AppException as e:
+            # propagate refresh token issues
+            raise e
 
-        # Remove JWT-managed claims before re-issuing
         for key in ("exp", "iat", "typ"):
             claims.pop(key, None)
 
-        return self.generate_access_token(
-            payload=claims,
-            expires_in=expires_in,
-        )
+        return self.generate_access_token(payload=claims, expires_in=expires_in)

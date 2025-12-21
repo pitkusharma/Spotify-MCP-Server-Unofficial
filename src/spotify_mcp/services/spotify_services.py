@@ -1,44 +1,9 @@
-from typing import Any, Dict, List, Callable
-from functools import wraps
-
+from typing import Dict, List
 import requests
 
-from app.spotify.auth import get_access_token
-from app.common.responses import AppResponse
-
-
-BASE_URL: str = "https://api.spotify.com/v1"
-
-
-class SpotifyServiceError(Exception):
-    """
-    Raised when a Spotify API request fails.
-    """
-    pass
-
-
-def with_spotify_token(func: Callable[..., Any]) -> Callable[..., Any]:
-    """
-    Decorator that injects a valid Spotify access token into request headers.
-    """
-    @wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        try:
-            token: str = get_access_token()
-        except Exception as e:
-            return AppResponse(
-                status=False,
-                message=f"Token error: {str(e)}",
-                data=None
-            )
-
-        headers: Dict[str, str] = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
-
-        return func(headers, *args, **kwargs)
-    return wrapper
+from src.common.responses import AppResponse
+from src.core.config import settings
+from src.spotify_mcp.utils.decorators import with_spotify_token
 
 
 # =========================
@@ -48,7 +13,7 @@ def with_spotify_token(func: Callable[..., Any]) -> Callable[..., Any]:
 @with_spotify_token
 def play(headers: Dict[str, str]) -> AppResponse:
     """Resume/start playback."""
-    response = requests.put(f"{BASE_URL}/me/player/play", headers=headers)
+    response = requests.put(f"{settings.SPOTIFY_BASE_URL}/me/player/play", headers=headers)
 
     if response.status_code not in (200, 204):
         return AppResponse(status=False, message=f"Play failed: {response.text}", data=None)
@@ -59,7 +24,7 @@ def play(headers: Dict[str, str]) -> AppResponse:
 @with_spotify_token
 def pause(headers: Dict[str, str]) -> AppResponse:
     """Pause playback."""
-    response = requests.put(f"{BASE_URL}/me/player/pause", headers=headers)
+    response = requests.put(f"{settings.SPOTIFY_BASE_URL}/me/player/pause", headers=headers)
 
     if response.status_code not in (200, 204):
         return AppResponse(status=False, message=f"Pause failed: {response.text}", data=None)
@@ -70,7 +35,7 @@ def pause(headers: Dict[str, str]) -> AppResponse:
 @with_spotify_token
 def next_track(headers: Dict[str, str]) -> AppResponse:
     """Skip to next track."""
-    response = requests.post(f"{BASE_URL}/me/player/next", headers=headers)
+    response = requests.post(f"{settings.SPOTIFY_BASE_URL}/me/player/next", headers=headers)
 
     if response.status_code not in (200, 204):
         return AppResponse(status=False, message=f"Next track failed: {response.text}", data=None)
@@ -81,7 +46,7 @@ def next_track(headers: Dict[str, str]) -> AppResponse:
 @with_spotify_token
 def previous_track(headers: Dict[str, str]) -> AppResponse:
     """Skip to previous track."""
-    response = requests.post(f"{BASE_URL}/me/player/previous", headers=headers)
+    response = requests.post(f"{settings.SPOTIFY_BASE_URL}/me/player/previous", headers=headers)
 
     if response.status_code not in (200, 204):
         return AppResponse(status=False, message=f"Previous track failed: {response.text}", data=None)
@@ -96,7 +61,7 @@ def previous_track(headers: Dict[str, str]) -> AppResponse:
 @with_spotify_token
 def get_user_profile(headers: Dict[str, str]) -> AppResponse:
     """Fetch current user profile."""
-    response = requests.get(f"{BASE_URL}/me", headers=headers)
+    response = requests.get(f"{settings.SPOTIFY_BASE_URL}/me", headers=headers)
 
     if response.status_code != 200:
         return AppResponse(status=False, message=f"Profile failed: {response.text}", data=None)
@@ -112,7 +77,7 @@ def get_user_profile(headers: Dict[str, str]) -> AppResponse:
 def get_user_playlists(headers: Dict[str, str], limit: int = 20) -> AppResponse:
     """Retrieve user playlists."""
     response = requests.get(
-        f"{BASE_URL}/me/playlists",
+        f"{settings.SPOTIFY_BASE_URL}/me/playlists",
         headers=headers,
         params={"limit": limit}
     )
@@ -127,7 +92,7 @@ def get_user_playlists(headers: Dict[str, str], limit: int = 20) -> AppResponse:
 def get_playlist_tracks(headers: Dict[str, str], playlist_id: str, limit: int = 50) -> AppResponse:
     """Fetch tracks from a playlist."""
     response = requests.get(
-        f"{BASE_URL}/playlists/{playlist_id}/tracks",
+        f"{settings.SPOTIFY_BASE_URL}/playlists/{playlist_id}/tracks",
         headers=headers,
         params={"limit": limit}
     )
@@ -154,7 +119,7 @@ def create_playlist(
     }
 
     response = requests.post(
-        f"{BASE_URL}/users/{user_id}/playlists",
+        f"{settings.SPOTIFY_BASE_URL}/users/{user_id}/playlists",
         headers=headers,
         json=payload
     )
@@ -169,7 +134,7 @@ def create_playlist(
 def add_tracks_to_playlist(headers: Dict[str, str], playlist_id: str, track_uris: List[str]) -> AppResponse:
     """Add tracks to playlist."""
     response = requests.post(
-        f"{BASE_URL}/playlists/{playlist_id}/tracks",
+        f"{settings.SPOTIFY_BASE_URL}/playlists/{playlist_id}/tracks",
         headers=headers,
         json={"uris": track_uris}
     )
@@ -186,7 +151,7 @@ def remove_tracks_from_playlist(headers: Dict[str, str], playlist_id: str, track
     payload = {"tracks": [{"uri": uri} for uri in track_uris]}
 
     response = requests.delete(
-        f"{BASE_URL}/playlists/{playlist_id}/tracks",
+        f"{settings.SPOTIFY_BASE_URL}/playlists/{playlist_id}/tracks",
         headers=headers,
         json=payload
     )
@@ -205,7 +170,7 @@ def remove_tracks_from_playlist(headers: Dict[str, str], playlist_id: str, track
 def search_tracks(headers: Dict[str, str], query: str, limit: int = 10) -> AppResponse:
     """Search tracks."""
     params = {"q": query, "type": "track", "limit": limit}
-    response = requests.get(f"{BASE_URL}/search", headers=headers, params=params)
+    response = requests.get(f"{settings.SPOTIFY_BASE_URL}/search", headers=headers, params=params)
 
     if response.status_code != 200:
         return AppResponse(status=False, message=f"Search failed: {response.text}", data=None)
@@ -222,7 +187,7 @@ def search_tracks(headers: Dict[str, str], query: str, limit: int = 10) -> AppRe
 def get_liked_songs(headers: Dict[str, str], limit: int = 20) -> AppResponse:
     """Get user's liked songs."""
     params = {"limit": limit}
-    response = requests.get(f"{BASE_URL}/me/tracks", headers=headers, params=params)
+    response = requests.get(f"{settings.SPOTIFY_BASE_URL}/me/tracks", headers=headers, params=params)
 
     if response.status_code != 200:
         return AppResponse(status=False, message=f"Liked songs failed: {response.text}", data=None)

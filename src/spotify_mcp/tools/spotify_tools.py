@@ -1,44 +1,16 @@
-from typing import Any, Dict, List
+from typing import Dict, Any, List
 
-from mcp.server.fastmcp import FastMCP
-
-from src.spotify.services import (
-    play,
-    pause,
-    next_track,
-    previous_track,
-    get_user_profile,
-    get_user_playlists,
-    get_playlist_tracks,
-    create_playlist,
-    add_tracks_to_playlist,
-    remove_tracks_from_playlist,
-    search_tracks,
-    get_liked_songs,
-)
-from mcp.server.session import ServerSession
-from mcp.server.fastmcp import Context
-import asyncio
-from mcp.server.fastmcp.prompts import base
-
-from mcp.server.auth.provider import AccessToken, TokenVerifier
-from mcp.server.auth.settings import AuthSettings
-
-mcp = FastMCP(
-    name="Spotify MCP Server (Unofficial)",
-    auth=AuthSettings(
-        issuer_url=AnyHttpUrl("https://auth.example.com"),  # Authorization Server URL
-        resource_server_url=AnyHttpUrl("http://localhost:3001"),  # This server's URL
-        required_scopes=["user"],
-    )
-)
+from src.spotify_mcp.server import mcp as spotify_mcp
+from src.spotify_mcp.services.spotify_services import play, pause, next_track, previous_track, get_user_profile, \
+    get_user_playlists, get_playlist_tracks, create_playlist, add_tracks_to_playlist, remove_tracks_from_playlist, \
+    search_tracks, get_liked_songs
 
 
 # =========================
 # PLAYER TOOLS
 # =========================
 
-@mcp.tool()
+@spotify_mcp.tool()
 def play_music() -> Dict[str, Any]:
     """
     Start or resume music playback on the user's active Spotify device.
@@ -53,7 +25,7 @@ def play_music() -> Dict[str, Any]:
     return play().model_dump()
 
 
-@mcp.tool()
+@spotify_mcp.tool()
 def pause_music() -> Dict[str, Any]:
     """
     Pause the currently playing Spotify track.
@@ -65,7 +37,7 @@ def pause_music() -> Dict[str, Any]:
     return pause().model_dump()
 
 
-@mcp.tool()
+@spotify_mcp.tool()
 def next_song() -> Dict[str, Any]:
     """
     Skip forward to the next track in the playback queue.
@@ -77,7 +49,7 @@ def next_song() -> Dict[str, Any]:
     return next_track().model_dump()
 
 
-@mcp.tool()
+@spotify_mcp.tool()
 def previous_song() -> Dict[str, Any]:
     """
     Skip backward to the previous track in the playback queue.
@@ -93,7 +65,7 @@ def previous_song() -> Dict[str, Any]:
 # PROFILE TOOLS
 # =========================
 
-@mcp.tool()
+@spotify_mcp.tool()
 def get_profile() -> Dict[str, Any]:
     """
     Retrieve the Spotify profile of the currently authenticated user.
@@ -112,7 +84,7 @@ def get_profile() -> Dict[str, Any]:
 # PLAYLIST TOOLS
 # =========================
 
-@mcp.tool()
+@spotify_mcp.tool()
 def list_playlists(limit: int = 20) -> Dict[str, Any]:
     """
     Fetch the current user's playlists.
@@ -127,7 +99,7 @@ def list_playlists(limit: int = 20) -> Dict[str, Any]:
     return get_user_playlists(limit=limit).model_dump()
 
 
-@mcp.tool()
+@spotify_mcp.tool()
 def list_playlist_tracks(playlist_id: str, limit: int = 50) -> Dict[str, Any]:
     """
     Get tracks from a specific Spotify playlist.
@@ -143,7 +115,7 @@ def list_playlist_tracks(playlist_id: str, limit: int = 50) -> Dict[str, Any]:
     return get_playlist_tracks(playlist_id=playlist_id, limit=limit).model_dump()
 
 
-@mcp.tool()
+@spotify_mcp.tool()
 def create_new_playlist(
     user_id: str,
     name: str,
@@ -171,7 +143,7 @@ def create_new_playlist(
     ).model_dump()
 
 
-@mcp.tool()
+@spotify_mcp.tool()
 def add_tracks(
     playlist_id: str,
     track_uris: List[str]
@@ -193,7 +165,7 @@ def add_tracks(
     ).model_dump()
 
 
-@mcp.tool()
+@spotify_mcp.tool()
 def remove_tracks(
     playlist_id: str,
     track_uris: List[str]
@@ -219,7 +191,7 @@ def remove_tracks(
 # SEARCH TOOLS
 # =========================
 
-@mcp.tool()
+@spotify_mcp.tool()
 def search_song(query: str, limit: int = 10) -> Dict[str, Any]:
     """
     Search for tracks on Spotify using a text query.
@@ -239,7 +211,7 @@ def search_song(query: str, limit: int = 10) -> Dict[str, Any]:
 # LIBRARY TOOLS
 # =========================
 
-@mcp.tool()
+@spotify_mcp.tool()
 def liked_songs(limit: int = 20) -> Dict[str, Any]:
     """
     Retrieve the user's liked (saved) songs from Spotify.
@@ -252,40 +224,3 @@ def liked_songs(limit: int = 20) -> Dict[str, Any]:
             Dictionary containing liked tracks.
     """
     return get_liked_songs(limit=limit).model_dump()
-
-@mcp.resource("config://settings")
-def get_settings() -> str:
-    """Get application settings."""
-    return """{
-  "theme": "dark",
-  "language": "en",
-  "debug": false
-}"""
-
-@mcp.tool()
-async def get_temperature_of_saturn(ctx: Context[ServerSession, None]) -> str:
-    """Calculates heavy computation and finds out the temperature of saturn."""
-    await ctx.info(f"Starting heavy computation...")
-
-    for i in range(10):
-        await asyncio.sleep(1)
-        progress = (i + 1) / 10
-        await ctx.report_progress(
-            progress=progress,
-            total=1.0,
-            message=f"Step {i + 1}/{10}",
-        )
-        await ctx.debug(f"Completed step {i + 1}")
-
-    return f"Tempreature of saturn is -180 degree celsius."
-
-@mcp.prompt(title="Fairy Gold Prompt Template Boss")
-def fairy_gold_prompt_template_boss(error: str) -> list[base.Message]:
-    return [
-        base.UserMessage("I'm seeing this error:"),
-        base.UserMessage(error),
-        base.AssistantMessage("I'll help debug that. What have you tried so far?"),
-    ]
-
-if __name__ == "__main__":
-    mcp.run("sse")
