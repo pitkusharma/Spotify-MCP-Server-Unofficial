@@ -11,7 +11,7 @@ from pydantic import HttpUrl
 from src.common.token import JWTService
 from src.core.config import settings
 from src.common.security import generate_pkce_pair, verify_pkce
-
+from src.models.dto.auth_models import ClientRegistrationRequest
 
 # ---------------------------------------------------------------------------
 # In-memory stores (yes yes, Redis later)
@@ -36,7 +36,7 @@ def health():
 
 def protected_resource_metadata():
     return {
-        "resource": f"settings.BASE_URL/mcp",
+        "resource": settings.MCP_SERVER_URL,
         "authorization_servers": [settings.BASE_URL],
         "scopes_supported": settings.SUPPORTED_SCOPES
     }
@@ -52,6 +52,8 @@ def authorization_server_metadata():
         "response_types_supported": settings.RESPONSE_TYPES_SUPPORTED,
         "grant_types_supported": settings.GRANT_TYPES_SUPPORTED,
         "code_challenge_methods_supported": settings.CODE_CHALLENGE_METHODS_SUPPORTED,
+        "token_endpoint_auth_methods_supported": settings.TOKEN_ENDPOINT_AUTH_METHODS_SUPPORTED,
+        "pkce_required": settings.PKCE_REQUIRED,
     }
 
 
@@ -59,36 +61,52 @@ def authorization_server_metadata():
 # Client registration
 # ---------------------------------------------------------------------------
 
-def register_client(client_name: str, redirect_uris: List[HttpUrl], grant_types: List[str], response_types: List[str]):
-    if not redirect_uris:
+def register_client(payload: ClientRegistrationRequest):
+    if not payload.redirect_uris:
         raise HTTPException(400, "redirect_uris required")
 
-    allowed_grants = list(set(grant_types) & set(settings.GRANT_TYPES_SUPPORTED))
-    if not allowed_grants:
-        raise HTTPException(400, f"Unsupported grant_type provided. supported grant_types: {settings.GRANT_TYPES_SUPPORTED}")
+    # grant_types: reject if ANY unsupported
+    unsupported_grants = set(payload.grant_types) - set(settings.GRANT_TYPES_SUPPORTED)
+    if unsupported_grants:
+        raise HTTPException(400, f"unsupported_grant_type: {unsupported_grants}")
 
-    allowed_responses = list(set(response_types) & set(settings.RESPONSE_TYPES_SUPPORTED))
-    if not allowed_responses:
-        raise HTTPException(400, f"Unsupported response_type provided. supported response_type : {settings.RESPONSE_TYPES_SUPPORTED}")
+    # response_types: same rule
+    unsupported_responses = set(payload.response_types) - set(settings.RESPONSE_TYPES_SUPPORTED)
+    if unsupported_responses:
+        raise HTTPException(400, f"unsupported_response_type: {unsupported_responses}")
+
+    if payload.token_endpoint_auth_method != "none":
+        raise HTTPException(400, "invalid_client_metadata")
+
+    if payload.scope:
+        requested = set(payload.scope.split())
+        unsupported = requested - set(settings.SUPPORTED_SCOPES)
+        if unsupported:
+            raise HTTPException(400, "unsupported_scope")
 
     client_id = secrets.token_urlsafe(16)
-    client_secret = None
-    if settings.TOKEN_ENDPOINT_AUTH_METHOD != "none":
-        client_secret = secrets.token_urlsafe(32)
 
     CLIENTS[client_id] = {
         "client_id": client_id,
-        "client_secret": client_secret,
         "client_id_issued_at": int(time.time()),
-        "client_secret_expires_at": 0,
-        "client_name": client_name,
-        "redirect_uris": [str(uri) for uri in redirect_uris],
-        "grant_types": allowed_grants,
-        "response_types": allowed_responses,
-        "token_endpoint_auth_method": settings.TOKEN_ENDPOINT_AUTH_METHOD,
+        "client_name": payload.client_name or "",
+        "redirect_uris": [str(uri) for uri in payload.redirect_uris],
+        "grant_types": payload.grant_types,
+        "response_types": payload.response_types,
+        "token_endpoint_auth_method": "none",
+        "scope": payload.scope,
     }
 
-    return CLIENTS[client_id]
+    return {
+        "client_id": client_id,
+        "client_id_issued_at": CLIENTS[client_id]["client_id_issued_at"],
+        "client_name": CLIENTS[client_id]["client_name"],
+        "redirect_uris": CLIENTS[client_id]["redirect_uris"],
+        "grant_types": payload.grant_types,
+        "response_types": payload.response_types,
+        "token_endpoint_auth_method": "none",
+        "scope": payload.scope,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +138,14 @@ def authorize(
     if code_challenge_method not in settings.CODE_CHALLENGE_METHODS_SUPPORTED:
         raise HTTPException(400, "Invalid code_challenge_method")
 
+    if not scope:
+        raise HTTPException(400, "invalid_scope")
+
+    requested_scopes = set(scope.split())
+    if not requested_scopes.issubset(set(settings.SUPPORTED_SCOPES)):
+        raise HTTPException(400, "invalid_scope")
+    requested_scopes = ' '.join(requested_scopes)
+
     # Create broker-side auth request
     auth_id = secrets.token_urlsafe(32)
     AUTH_REQUESTS[auth_id] = {
@@ -127,7 +153,7 @@ def authorize(
         "redirect_uri": redirect_uri,
         "original_state": state,
         "original_code_challenge": code_challenge,
-        "original_scope": scope,
+        "original_scope": requested_scopes,
         "expires_at": time.time() + settings.AUTH_REQUEST_TTL,
     }
     code_verifier, code_challenge = generate_pkce_pair()
@@ -137,7 +163,7 @@ def authorize(
         "client_id": settings.SPOTIFY_CLIENT_ID,
         "response_type": "code",
         "redirect_uri": str(settings.SPOTIFY_REDIRECT_URI),
-        "scope": settings.SUPPORTED_SCOPES_STR,
+        "scope": requested_scopes,
         "state": auth_id,  # IMPORTANT
         "code_challenge": code_challenge,
         "code_challenge_method": code_challenge_method,
@@ -152,7 +178,7 @@ def authorize(
 # Spotify callback
 # ---------------------------------------------------------------------------
 
-def spotify_callback(code: str, state: Optional[str]):
+def spotify_callback(code: str, state: str):
     auth = AUTH_REQUESTS.get(state, None)
     if not auth:
         raise HTTPException(400, "Invalid or expired authorization request")
@@ -183,7 +209,6 @@ async def issue_token(
         code: Optional[str]=None,
         redirect_uri: Optional[HttpUrl]=None,
         code_verifier: Optional[str]=None,
-        client_secret: Optional[str]=None,
         refresh_token: Optional[str]=None,
 ):
     if grant_type not in settings.GRANT_TYPES_SUPPORTED:
@@ -194,10 +219,6 @@ async def issue_token(
     if not client:
         raise HTTPException(400, "Invalid client_id")
 
-    if settings.TOKEN_ENDPOINT_AUTH_METHOD == 'client_secret_post' and (
-            not client_secret or client_secret != client['client_secret']):
-        raise HTTPException(400, "Invalid client_secret")
-
     if grant_type == "authorization_code":
         return await _code_grant(client_id, code, redirect_uri, code_verifier)
     elif grant_type == "refresh_token":
@@ -207,6 +228,9 @@ async def issue_token(
 
 
 async def _code_grant(client_id: str, code: str, redirect_uri: HttpUrl, code_verifier: str):
+    if not code or not redirect_uri or not code_verifier:
+        raise HTTPException(400, "invalid_request")
+
     auth_req = AUTH_REQUESTS.pop(code, None)
     if not auth_req:
         raise HTTPException(400, "Invalid authorization request")
@@ -246,6 +270,7 @@ async def _code_grant(client_id: str, code: str, redirect_uri: HttpUrl, code_ver
         "client_id": client_id,
         "access_token": spotify_tokens["access_token"],
         "refresh_token": spotify_tokens["refresh_token"],
+        "scope": auth_req["original_scope"]
     }
 
     return {
@@ -253,7 +278,7 @@ async def _code_grant(client_id: str, code: str, redirect_uri: HttpUrl, code_ver
         "refresh_token": refresh_token,
         "token_type": "bearer",
         "expires_in": spotify_tokens.get('expires_in'),
-        "scope": settings.SUPPORTED_SCOPES_STR
+        "scope": auth_req["original_scope"]
     }
 
 async def _refresh_grant(client_id: str, refresh_token: str):
@@ -294,6 +319,7 @@ async def _refresh_grant(client_id: str, refresh_token: str):
         "client_id": client_id,
         "access_token": new_token['access_token'],
         "refresh_token": new_token['refresh_token'],
+        "scope": stored_tokens["scope"]
     }
 
     return {
@@ -301,5 +327,5 @@ async def _refresh_grant(client_id: str, refresh_token: str):
         "token_type": "bearer",
         "expires_in": new_token.get('expires_in'),
         "refresh_token": refresh_token,
-        "scope": settings.SUPPORTED_SCOPES_STR
+        "scope": stored_tokens["scope"]
     }

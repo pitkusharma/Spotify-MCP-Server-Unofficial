@@ -9,7 +9,7 @@ from src.models.dto.auth_models import (
     ProtectedResourceMetadata,
     AuthorizationServerMetadata,
     ClientRegistrationResponse,
-    TokenResponse,
+    TokenResponse, ClientRegistrationRequest,
 )
 
 router = APIRouter()
@@ -30,14 +30,9 @@ def authorization_server_metadata():
     return auth_services.authorization_server_metadata()
 
 
-@router.post("/register", response_model=ClientRegistrationResponse)
-def register_client(
-        client_name: str = Form(...),
-        redirect_uris: List[HttpUrl] = Form(...),
-        grant_types: List[str] = Form(...),
-        response_types: List[str] = Form(...),
-):
-    return auth_services.register_client(client_name, redirect_uris, grant_types, response_types)
+@router.post("/register", response_model=ClientRegistrationResponse, responses={415: {"description": "application/json required"}})
+def register_client(payload: ClientRegistrationRequest):
+    return auth_services.register_client(payload)
 
 
 @router.get("/authorize")
@@ -62,7 +57,7 @@ def authorize(
 
 
 @router.get("/callback/spotify")
-def spotify_callback(code: str, state: Optional[str] = None):
+def spotify_callback(code: str, state: str):
     return auth_services.spotify_callback(code, state)
 
 
@@ -73,12 +68,11 @@ async def token(
         code: str = Form(None),
         redirect_uri: HttpUrl = Form(None),
         code_verifier: str = Form(None),
-        client_secret: Optional[str] = Form(None),
         refresh_token: str = Form(None),
 
 
 ):
-    return await auth_services.issue_token(grant_type, client_id, code, redirect_uri, code_verifier, client_secret, refresh_token)
+    return await auth_services.issue_token(grant_type, client_id, code, redirect_uri, code_verifier, refresh_token)
 
 
 # @router.post("/refresh", response_model=TokenResponse)
