@@ -1,8 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.common.exceptions import attach_exception_handlers
 from src.core.config import settings
 from src.routes.auth.auth_routes import router
+from src.spotify_mcp.server import mcp
+from src.spotify_mcp.tools.spotify_tools import *
 
 
 app = FastAPI(
@@ -23,3 +26,10 @@ app.add_middleware(
 
 # 🚀 Mount router
 app.include_router(router)
+
+# Attach exception handlers
+
+attach_exception_handlers(app)
+
+# Mount MCP Server
+app.mount("/mcp", mcp.sse_app())

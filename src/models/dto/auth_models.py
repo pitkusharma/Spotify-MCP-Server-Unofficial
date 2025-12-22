@@ -27,7 +27,8 @@ class AuthorizationServerMetadata(BaseModel):
     response_types_supported: List[str]
     grant_types_supported: List[str]
     code_challenge_methods_supported: List[str]
-
+    token_endpoint_auth_methods_supported: List[str]
+    pkce_required: bool = settings.PKCE_REQUIRED
 
 # ----- Client Registration -----
 class ClientRegistrationRequest(BaseModel):
@@ -35,21 +36,20 @@ class ClientRegistrationRequest(BaseModel):
     redirect_uris: List[AnyHttpUrl]
     grant_types: List[str]
     response_types: List[str]
-    scope: Optional[str] = None
     token_endpoint_auth_method: Optional[str] = "none"
+    scope: Optional[str] = None
+
     model_config = ConfigDict(extra="allow")
 
 class ClientRegistrationResponse(BaseModel):
     client_id: str
-    client_secret: Optional[str] = None
-    client_secret_expires_at: int = 0
-    redirect_uris: List[str] = []
     client_id_issued_at: int
     client_name: str
     redirect_uris: List[str]
     grant_types: List[str]
     response_types: List[str]
-    token_endpoint_auth_method: str = settings.TOKEN_ENDPOINT_AUTH_METHOD
+    token_endpoint_auth_method: str
+    scope: Optional[str] = None
 
 
 # ----- Token -----
@@ -58,10 +58,4 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     refresh_token: str
-    scope: str
-
-class RefreshTokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    expires_in: int
     scope: str

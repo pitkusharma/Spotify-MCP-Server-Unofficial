@@ -2,7 +2,6 @@ import base64
 import hashlib
 import hmac
 import os
-from fastapi import HTTPException
 from typing import Tuple
 
 
@@ -41,7 +40,7 @@ def generate_pkce_pair() -> Tuple[str, str]:
 
     return code_verifier, code_challenge
 
-def verify_pkce(code_verifier: str, stored_code_challenge: str) -> None:
+def verify_pkce(code_verifier: str, stored_code_challenge: str) -> bool:
     """
     Verify a PKCE code_verifier against a previously stored S256 code_challenge.
 
@@ -57,7 +56,7 @@ def verify_pkce(code_verifier: str, stored_code_challenge: str) -> None:
             authorization request.
 
     Raises:
-        HTTPException: If the computed challenge does not match the stored
+        Exception: If the computed challenge does not match the stored
             code_challenge, indicating PKCE verification failure.
     """
 
@@ -69,5 +68,4 @@ def verify_pkce(code_verifier: str, stored_code_challenge: str) -> None:
         .decode("ascii")
     )
 
-    if not hmac.compare_digest(computed_challenge, stored_code_challenge):
-        raise HTTPException(400, "Code verification failed")
+    return hmac.compare_digest(computed_challenge, stored_code_challenge)

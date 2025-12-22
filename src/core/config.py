@@ -1,3 +1,4 @@
+from mcp.server.auth import settings
 from pydantic import AnyHttpUrl
 from pydantic_settings import BaseSettings
 from typing import List, Optional
@@ -19,8 +20,9 @@ class Settings(BaseSettings):
         return f"{self.PROTOCOL}://{self.HOST}:{self.PORT}"
 
     # ------------------------------------------------------------------
-    # Spotify OAuth
+    # Spotify
     # ------------------------------------------------------------------
+    SPOTIFY_BASE_URL: str = "https://api.spotify.com/v1"
     SPOTIFY_CLIENT_ID: str
     SPOTIFY_CLIENT_SECRET: str
     SPOTIFY_AUTH_URL: str = "https://accounts.spotify.com/authorize"
@@ -60,6 +62,7 @@ class Settings(BaseSettings):
     CODE_CHALLENGE_METHODS_SUPPORTED: List[str] = ["S256"]
     TOKEN_ENDPOINT_AUTH_METHODS_SUPPORTED: List[str] = ["none"]
     TOKEN_ENDPOINT_AUTH_METHOD: str = "none"
+    PKCE_REQUIRED: bool = True
 
     AUTH_REQUEST_TTL: int = 300 # 5 minutes
 
