@@ -1,210 +1,212 @@
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from src.spotify_mcp.server import mcp as spotify_mcp
-from src.spotify_mcp.services.spotify_services import play, pause, next_track, previous_track, get_user_profile, \
-    get_user_playlists, get_playlist_tracks, create_playlist, add_tracks_to_playlist, remove_tracks_from_playlist, \
-    search_tracks, get_liked_songs
-
+from src.spotify_mcp.services.spotify_services import (
+    play,
+    pause,
+    resume,
+    next_track,
+    previous_track,
+    get_current_playback,
+    set_volume,
+    get_volume,
+    search,
+    play_track,
+    play_playlist,
+    play_album,
+    play_artist,
+    get_liked_tracks,
+    get_user_playlists,
+    get_devices,
+    transfer_playback,
+)
 
 # =========================
-# PLAYER TOOLS
+# PLAYBACK TOOLS
 # =========================
 
 @spotify_mcp.tool()
-def play_music() -> Dict[str, Any]:
+async def play_music() -> Dict[str, Any]:
     """
     Start or resume music playback on the user's active Spotify device.
 
+    Use when:
+    - User asks to play music
+    - Agent decides to resume playback after a pause
+
     Returns:
         Dict[str, Any]:
-            A JSON-like dictionary containing:
-            - "status": bool -> True if request succeeded, False otherwise.
-            - "message": str -> Human-readable success or error message.
-            - "data": Any -> Additional response data if available, else None.
+            {
+                "status": bool,
+                "message": str,
+                "data": None
+            }
     """
-    return play().model_dump()
+    response = await play()
+    return response.model_dump()
 
 
 @spotify_mcp.tool()
-def pause_music() -> Dict[str, Any]:
+async def pause_music() -> Dict[str, Any]:
     """
-    Pause the currently playing Spotify track.
+    Pause the currently playing track.
 
-    Returns:
-        Dict[str, Any]:
-            JSON-like dict with status, message, and optional data.
+    Use when:
+    - User explicitly asks to pause
+    - Agent wants silence without changing context
     """
-    return pause().model_dump()
+    response = await pause()
+    return response.model_dump()
 
 
 @spotify_mcp.tool()
-def next_song() -> Dict[str, Any]:
+async def resume_music() -> Dict[str, Any]:
     """
-    Skip forward to the next track in the playback queue.
+    Resume playback without changing the current context.
 
-    Returns:
-        Dict[str, Any]:
-            JSON-like dict with status, message, and optional data.
+    Alias for play_music.
     """
-    return next_track().model_dump()
+    response = await resume()
+    return response.model_dump()
 
 
 @spotify_mcp.tool()
-def previous_song() -> Dict[str, Any]:
+async def next_song() -> Dict[str, Any]:
     """
-    Skip backward to the previous track in the playback queue.
+    Skip to the next track in the queue.
 
-    Returns:
-        Dict[str, Any]:
-            JSON-like dict with status, message, and optional data.
+    Use when:
+    - User dislikes current song
+    - Agent detects repeated skips or frustration
     """
-    return previous_track().model_dump()
+    response = await next_track()
+    return response.model_dump()
+
+
+@spotify_mcp.tool()
+async def previous_song() -> Dict[str, Any]:
+    """
+    Go back to the previous track.
+    """
+    response = await previous_track()
+    return response.model_dump()
+
+
+@spotify_mcp.tool()
+async def current_playback() -> Dict[str, Any]:
+    """
+    Fetch the current playback state.
+
+    Use when:
+    - Agent needs context before acting
+    - Verifying what is currently playing
+    """
+    response = await get_current_playback()
+    return response.model_dump()
 
 
 # =========================
-# PROFILE TOOLS
+# VOLUME TOOLS
 # =========================
 
 @spotify_mcp.tool()
-def get_profile() -> Dict[str, Any]:
+async def set_playback_volume(volume: int) -> Dict[str, Any]:
     """
-    Retrieve the Spotify profile of the currently authenticated user.
-
-    Returns:
-        Dict[str, Any]:
-            Dictionary with:
-            - "status": bool
-            - "message": str
-            - "data": dict with user profile details if successful
-    """
-    return get_user_profile().model_dump()
-
-
-# =========================
-# PLAYLIST TOOLS
-# =========================
-
-@spotify_mcp.tool()
-def list_playlists(limit: int = 20) -> Dict[str, Any]:
-    """
-    Fetch the current user's playlists.
+    Set playback volume (0–100).
 
     Args:
-        limit (int): Maximum number of playlists to return.
+        volume (int): Desired volume percentage.
 
-    Returns:
-        Dict[str, Any]:
-            Dictionary containing playlists data if successful.
+    Use when:
+    - Agent wants to reduce or increase intensity
+    - User explicitly asks to change volume
     """
-    return get_user_playlists(limit=limit).model_dump()
+    response = await set_volume(volume=volume)
+    return response.model_dump()
 
 
 @spotify_mcp.tool()
-def list_playlist_tracks(playlist_id: str, limit: int = 50) -> Dict[str, Any]:
+async def get_playback_volume() -> Dict[str, Any]:
     """
-    Get tracks from a specific Spotify playlist.
+    Get the current playback volume.
 
-    Args:
-        playlist_id (str): Spotify ID of the playlist.
-        limit (int): Maximum number of tracks to fetch.
-
-    Returns:
-        Dict[str, Any]:
-            Dictionary containing track list if successful.
+    Use when:
+    - Agent wants to make relative volume adjustments
     """
-    return get_playlist_tracks(playlist_id=playlist_id, limit=limit).model_dump()
+    response = await get_volume()
+    return response.model_dump()
 
+
+# =========================
+# SEARCH & PLAY TOOLS
+# =========================
 
 @spotify_mcp.tool()
-def create_new_playlist(
-    user_id: str,
-    name: str,
-    description: str = "",
-    public: bool = False
+async def search_spotify(
+    query: str,
+    search_type: str = "track",
+    limit: int = 10,
 ) -> Dict[str, Any]:
     """
-    Create a new playlist for a Spotify user.
+    Search Spotify for tracks, artists, albums, or playlists.
 
     Args:
-        user_id (str): Spotify user ID.
-        name (str): Name of the new playlist.
-        description (str): Optional description for the playlist.
-        public (bool): Whether the playlist should be publicly visible.
+        query (str): Search keywords.
+        search_type (str): One of 'track', 'artist', 'album', 'playlist'.
+        limit (int): Maximum number of results.
 
-    Returns:
-        Dict[str, Any]:
-            Dictionary containing created playlist info if successful.
+    Use when:
+    - User asks to play something by name
+    - Agent needs to resolve a Spotify URI
     """
-    return create_playlist(
-        user_id=user_id,
-        name=name,
-        description=description,
-        public=public
-    ).model_dump()
+    response = await search(
+        query=query,
+        search_type=search_type,
+        limit=limit,
+    )
+    return response.model_dump()
 
 
 @spotify_mcp.tool()
-def add_tracks(
-    playlist_id: str,
-    track_uris: List[str]
-) -> Dict[str, Any]:
+async def play_song(track_uri: str) -> Dict[str, Any]:
     """
-    Add tracks to an existing Spotify playlist.
+    Play a specific track by Spotify URI.
 
     Args:
-        playlist_id (str): Spotify playlist ID.
-        track_uris (List[str]): List of Spotify track URIs.
+        track_uri (str): Spotify track URI.
 
-    Returns:
-        Dict[str, Any]:
-            Dictionary indicating success or failure.
+    Use when:
+        Exact track is already known.
     """
-    return add_tracks_to_playlist(
-        playlist_id=playlist_id,
-        track_uris=track_uris
-    ).model_dump()
+    response = await play_track(track_uri=track_uri)
+    return response.model_dump()
 
 
 @spotify_mcp.tool()
-def remove_tracks(
-    playlist_id: str,
-    track_uris: List[str]
-) -> Dict[str, Any]:
+async def play_playlist_by_uri(playlist_uri: str) -> Dict[str, Any]:
     """
-    Remove tracks from a Spotify playlist.
-
-    Args:
-        playlist_id (str): Spotify playlist ID.
-        track_uris (List[str]): List of Spotify track URIs to remove.
-
-    Returns:
-        Dict[str, Any]:
-            Dictionary indicating success or failure.
+    Play a playlist by Spotify URI.
     """
-    return remove_tracks_from_playlist(
-        playlist_id=playlist_id,
-        track_uris=track_uris
-    ).model_dump()
+    response = await play_playlist(playlist_uri=playlist_uri)
+    return response.model_dump()
 
-
-# =========================
-# SEARCH TOOLS
-# =========================
 
 @spotify_mcp.tool()
-def search_song(query: str, limit: int = 10) -> Dict[str, Any]:
+async def play_album_by_uri(album_uri: str) -> Dict[str, Any]:
     """
-    Search for tracks on Spotify using a text query.
-
-    Args:
-        query (str): Search keywords (song name, artist, etc.).
-        limit (int): Max results to return.
-
-    Returns:
-        Dict[str, Any]:
-            Dictionary containing matching tracks.
+    Play an album by Spotify URI.
     """
-    return search_tracks(query=query, limit=limit).model_dump()
+    response = await play_album(album_uri=album_uri)
+    return response.model_dump()
+
+
+@spotify_mcp.tool()
+async def play_artist_radio(artist_uri: str) -> Dict[str, Any]:
+    """
+    Start playback using an artist context (radio-style).
+    """
+    response = await play_artist(artist_uri=artist_uri)
+    return response.model_dump()
 
 
 # =========================
@@ -212,15 +214,68 @@ def search_song(query: str, limit: int = 10) -> Dict[str, Any]:
 # =========================
 
 @spotify_mcp.tool()
-def liked_songs(limit: int = 20) -> Dict[str, Any]:
+async def liked_tracks(limit: int = 20) -> Dict[str, Any]:
     """
-    Retrieve the user's liked (saved) songs from Spotify.
+    Retrieve the user's liked (saved) tracks.
 
     Args:
-        limit (int): Maximum number of songs to return.
+        limit (int): Maximum number of tracks.
 
-    Returns:
-        Dict[str, Any]:
-            Dictionary containing liked tracks.
+    Use when:
+    - Agent wants to personalize playback
+    - User asks for liked songs
     """
-    return get_liked_songs(limit=limit).model_dump()
+    response = await get_liked_tracks(limit=limit)
+    return response.model_dump()
+
+
+@spotify_mcp.tool()
+async def user_playlists(limit: int = 20) -> Dict[str, Any]:
+    """
+    Retrieve the user's playlists.
+
+    Args:
+        limit (int): Maximum number of playlists.
+    """
+    response = await get_user_playlists(limit=limit)
+    return response.model_dump()
+
+
+# =========================
+# DEVICE TOOLS
+# =========================
+
+@spotify_mcp.tool()
+async def available_devices() -> Dict[str, Any]:
+    """
+    List available Spotify playback devices.
+
+    Use when:
+    - Playback fails due to no active device
+    - Agent needs to switch devices
+    """
+    response = await get_devices()
+    return response.model_dump()
+
+
+@spotify_mcp.tool()
+async def switch_device(
+    device_id: str,
+    play_immediately: bool = True,
+) -> Dict[str, Any]:
+    """
+    Transfer playback to a specific device.
+
+    Args:
+        device_id (str): Spotify device ID.
+        play_immediately (bool): Resume playback immediately after transfer.
+
+    Use when:
+    - User selects a different device
+    - Agent detects no active playback device
+    """
+    response = await transfer_playback(
+        device_id=device_id,
+        play_immediately=play_immediately,
+    )
+    return response.model_dump()

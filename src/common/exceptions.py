@@ -24,6 +24,7 @@ class AppException(Exception):
     ):
         self.message = message
         self.status_code = status_code
+        self.headers = headers or {}
 
 
 def attach_exception_handlers(app: FastAPI):
