@@ -30,7 +30,7 @@ SPOTIFY_TOKENS: Dict[str, dict] = {}
 def health():
     return {
         "status": "ok",
-        "app": settings.APP_NAMEE,
+        "app": settings.APP_NAME,
         "env": settings.ENV,
     }
 
