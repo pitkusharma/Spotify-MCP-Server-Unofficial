@@ -52,4 +52,12 @@ app.include_router(router)
 attach_exception_handlers(app)
 
 # Mount MCP Server
-app.mount("/mcp", mcp.sse_app())
+mcp_app = mcp.sse_app()
+
+mcp_app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=[host for host in settings.ALLOWED_HOSTS.split(",") if host],
+)
+
+app.mount("/mcp", mcp_app)
+
