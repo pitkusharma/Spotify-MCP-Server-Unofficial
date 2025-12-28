@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -5,15 +6,27 @@ from src.common.exceptions import attach_exception_handlers
 from src.core.config import settings
 from src.routes.auth.auth_routes import router
 from src.spotify_mcp.server import mcp
+from src.core.db import init_db, close_db
 from src.spotify_mcp.tools.spotify_tools import *
 
 
+# Lifespan
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ---- Startup ----
+    await init_db()
+    yield
+    # ---- Shutdown ----
+    await close_db()
+
+# app
 app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG,
     openapi_url="/openapi.json" if settings.DEBUG else None,
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url=None,
+    lifespan=lifespan
 )
 
 # CORS

@@ -15,9 +15,7 @@ class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
     PORT: int = 8000
 
-    @property
-    def BASE_URL(self) -> str:
-        return f"{self.PROTOCOL}://{self.HOST}:{self.PORT}"
+    BASE_URL: str
 
     # ------------------------------------------------------------------
     # Spotify
@@ -73,7 +71,7 @@ class Settings(BaseSettings):
         return str(self.BASE_URL)
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TTL: int = 3600 # 1 hour
-    JWT_REFRESH_TTL: int = 31536000 # 1 year
+    JWT_REFRESH_TTL: int = 604800 # 1 week
 
     # ------------------------------------------------------------------
     # CORS
@@ -83,9 +81,9 @@ class Settings(BaseSettings):
     CORS_ALLOW_HEADERS: List[str] = ["*"]
 
     # ------------------------------------------------------------------
-    # MCP Server
+    # CORS
     # ------------------------------------------------------------------
-    MCP_SERVER_URL: str = "http://127.0.0.1:8000/sse"
+    DATABASE_URL: str
 
     # ------------------------------------------------------------------
     # Meta
