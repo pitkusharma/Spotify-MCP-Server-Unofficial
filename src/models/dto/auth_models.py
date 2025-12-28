@@ -37,7 +37,7 @@ class ClientRegistrationRequest(BaseModel):
     grant_types: List[str]
     response_types: List[str]
     token_endpoint_auth_method: Optional[str] = "none"
-    scope: Optional[str] = None
+    scope: Optional[str] = ''
 
     model_config = ConfigDict(extra="allow")
 
