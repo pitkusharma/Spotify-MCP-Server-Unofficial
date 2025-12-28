@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     BASE_URL: str
     ALLOWED_HOSTS: str
+    ALLOWED_ORIGINS: str
 
     # ------------------------------------------------------------------
     # Spotify
