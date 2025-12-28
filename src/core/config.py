@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     BASE_URL: str
+    ALLOWED_HOSTS: str
 
     # ------------------------------------------------------------------
     # Spotify
